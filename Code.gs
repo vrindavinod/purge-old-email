@@ -1,98 +1,76 @@
 /*
 |--------------------------------------------------------------------------
-| PurgeOldEmails 
+| PurgeOldEmails - All-in-one version (No Delays)
 |--------------------------------------------------------------------------
-| https://gist.github.com/benbjurstrom/00cdfdb24e39c59c124e812d5effa39a
-|
+| Deletes emails older than DELETE_AFTER_DAYS from Inbox,
+| except starred or important ones, in one run.
+| Runs daily if trigger is set.
+|--------------------------------------------------------------------------
 */
 
 // Purge messages automatically after how many days?
-var DELETE_AFTER_DAYS = 7
+var DELETE_AFTER_DAYS = 90;
 
-// Maximum number of message threads to process per run. 
-var PAGE_SIZE = 150
+// Maximum number of message threads to process per batch.
+var PAGE_SIZE = 150;
 
 /**
- * Create a trigger that executes the purge function every day.
- * Execute this function to install the script.
+ * Create a trigger that executes purge() every day.
+ * Run this function once to install the script.
  */
 function setPurgeTrigger() {
   ScriptApp
     .newTrigger('purge')
     .timeBased()
     .everyDays(1)
-    .create()
+    .create();
 }
 
 /**
- * Create a trigger that executes the purgeMore function two minutes from now
- */
-function setPurgeMoreTrigger(){
-  ScriptApp.newTrigger('purgeMore')
-  .timeBased()
-  .at(new Date((new Date()).getTime() + 1000 * 60 * 2))
-  .create()
-}
-
-/**
- * Deletes all triggers that call the purgeMore function.
- */
-function removePurgeMoreTriggers(){
-  var triggers = ScriptApp.getProjectTriggers()
-  for (var i = 0; i < triggers.length; i++) {
-    var trigger = triggers[i]
-    if(trigger.getHandlerFunction() === 'purgeMore'){
-      ScriptApp.deleteTrigger(trigger)
-    }
-  }
-}
-
-/**
- * Deletes all of the project's triggers
- * Execute this function to unintstall the script.
- */
-function removeAllTriggers() {
-  var triggers = ScriptApp.getProjectTriggers()
-  for (var i = 0; i < triggers.length; i++) {
-    ScriptApp.deleteTrigger(triggers[i])
-  }
-}
-
-/**
- * Wrapper for the purge function
- */
-function purgeMore() {
-  purge()
-}
-
-
-/**
- * Deletes any emails from the inbox that are more then 7 days old
- * and not starred or marked as important.
+ * Deletes all matching emails from Inbox in one run
  */
 function purge() {
-  removePurgeMoreTriggers()
-  
-  var search = 'in:inbox -in:starred -in:important older_than:' + DELETE_AFTER_DAYS + 'd'    
-  var threads = GmailApp.search(search, 0, PAGE_SIZE)
-  
-  if (threads.length === PAGE_SIZE) {
-    console.log('PAGE_SIZE exceeded. Setting a trigger to call the purgeMore function in 2 minutes.')
-    setPurgeMoreTrigger()
-  }
-  
-  console.log('Processing ' + threads.length + ' threads...')
-  
-  var cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - DELETE_AFTER_DAYS)
-  
-  // For each thread matching our search
-  for (var i = 0; i < threads.length; i++) {
-    var thread = threads[i]
-    
-    // Only delete if the newest message in the thread is older then DELETE_AFTER_DAYS
-    if (thread.getLastMessageDate() < cutoff) {
-      thread.moveToTrash();
+  var search = 'in:inbox -in:starred -in:important older_than:' + DELETE_AFTER_DAYS + 'd';
+  var cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - DELETE_AFTER_DAYS);
+
+  var start = 0;
+  var totalDeleted = 0;
+  var startTime = new Date().getTime();
+
+  while (true) {
+    var threads = GmailApp.search(search, start, PAGE_SIZE);
+    if (threads.length === 0) break;
+
+    console.log('Processing ' + threads.length + ' threads...');
+
+    for (var i = 0; i < threads.length; i++) {
+      var thread = threads[i];
+      if (thread.getLastMessageDate() < cutoff) {
+        thread.moveToTrash();
+        totalDeleted++;
+      }
     }
+
+    if (threads.length < PAGE_SIZE) break; // No more threads left
+    start += PAGE_SIZE;
+
+    // Stop early if close to Google’s 6-min execution limit
+    if ((new Date().getTime() - startTime) > (5 * 60 * 1000)) {
+      console.log('Stopping early to avoid timeout. Deleted so far: ' + totalDeleted);
+      return;
+    }
+  }
+
+  console.log('Deleted ' + totalDeleted + ' threads.');
+}
+
+/**
+ * Remove all triggers (if you ever need to uninstall).
+ */
+function removeAllTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    ScriptApp.deleteTrigger(triggers[i]);
   }
 }
